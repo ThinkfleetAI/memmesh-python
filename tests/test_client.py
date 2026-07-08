@@ -8,7 +8,7 @@ import respx
 from memmesh import MemMesh, MemoryType, subject
 from memmesh.errors import AuthenticationError, RateLimitError
 
-BASE = "https://memory.thinkfleet.ai"
+BASE = "https://app.memmesh.ai"
 PROJ = "proj_test"
 PREFIX = f"{BASE}/api/v1/projects/{PROJ}"
 

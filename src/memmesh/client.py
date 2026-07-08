@@ -11,7 +11,7 @@ from .resources.memory import AsyncMemoryResource, MemoryResource
 
 # The live API today. Moves to https://api.memmesh.ai as the rebrand lands;
 # override with ``base_url=...`` (or point at your self-hosted engine).
-DEFAULT_BASE_URL = "https://memory.thinkfleet.ai"
+DEFAULT_BASE_URL = "https://app.memmesh.ai"
 
 
 class MemMesh:

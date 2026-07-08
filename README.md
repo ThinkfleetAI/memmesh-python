@@ -64,7 +64,7 @@ and raises a typed error (`AuthenticationError`, `RateLimitError`,
 MemMesh(
     api_key="sk-...",
     project_id="proj_...",
-    base_url="https://memory.thinkfleet.ai",  # or your self-hosted engine
+    base_url="https://app.memmesh.ai",  # or your self-hosted engine
     timeout=30.0,
     max_retries=2,
 )
