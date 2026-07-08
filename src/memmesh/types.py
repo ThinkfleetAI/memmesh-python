@@ -61,6 +61,7 @@ def subject(kind: str, external_id: str) -> Subject:
 # Server payloads are returned verbatim as dicts.
 MemoryItem = Dict[str, Any]
 SearchResult = Dict[str, Any]
+IngestMediaResult = Dict[str, Any]
 Prediction = Dict[str, Any]
 PredictResult = Dict[str, Any]
 CalibrationReport = Dict[str, Any]

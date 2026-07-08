@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional
+import base64
+from typing import Any, List, Optional, Union
 
 from ..types import (
     FeedbackRating,
+    IngestMediaResult,
     MemoryItem,
     MemoryScope,
     MemoryType,
@@ -13,6 +15,27 @@ from ..types import (
     Subject,
     enum_value,
 )
+
+
+def _media_body(
+    media: Union[bytes, str],
+    mime_type: str,
+    user_id: Optional[str],
+    agent_id: Optional[str],
+    session_id: Optional[str],
+    source: Optional[str],
+) -> dict:
+    data_b64 = media if isinstance(media, str) else base64.b64encode(media).decode("ascii")
+    body: dict = {"dataBase64": data_b64, "mimeType": mime_type}
+    if user_id:
+        body["userId"] = user_id
+    if agent_id:
+        body["agentId"] = agent_id
+    if session_id:
+        body["sessionId"] = session_id
+    if source:
+        body["source"] = source
+    return body
 
 
 def _observe_body(
@@ -84,6 +107,24 @@ class MemoryResource:
         ingestion call for agents."""
         body = _observe_body(content, subject, type, scope, importance, category, activity_type, occurred_at, metadata)
         return self._t.post("/admin/memory", body, project_id)
+
+    def ingest_media(
+        self,
+        media: Union[bytes, str],
+        mime_type: str,
+        *,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        source: Optional[str] = None,
+        project_id: Optional[str] = None,
+    ) -> IngestMediaResult:
+        """Ingest an image / audio / document. The engine extracts text (vision,
+        transcription, or OCR via LiteLLM) and runs it through the observe
+        pipeline, so the result is real memories — not just a stored file.
+        Requires multimodal to be enabled on the engine."""
+        body = _media_body(media, mime_type, user_id, agent_id, session_id, source)
+        return self._t.post("/memory/media", body, project_id)
 
     def create(
         self,
@@ -245,6 +286,21 @@ class AsyncMemoryResource:
     ) -> MemoryItem:
         body = _observe_body(content, subject, type, scope, importance, category, activity_type, occurred_at, metadata)
         return await self._t.post("/admin/memory", body, project_id)
+
+    async def ingest_media(
+        self,
+        media: Union[bytes, str],
+        mime_type: str,
+        *,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        source: Optional[str] = None,
+        project_id: Optional[str] = None,
+    ) -> IngestMediaResult:
+        """Async mirror of :meth:`MemoryResource.ingest_media`."""
+        body = _media_body(media, mime_type, user_id, agent_id, session_id, source)
+        return await self._t.post("/memory/media", body, project_id)
 
     async def create(
         self,
