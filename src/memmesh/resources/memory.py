@@ -66,6 +66,13 @@ def _observe_body(
         "source": "admin_created",
         "metadata": md,
     }
+    if occurred_at:
+        # Event time, not ingest time. `validFrom` is the column behavior mining
+        # buckets day-of-week / hour-of-day on, so this is what makes a backfill
+        # work: without it every historical row lands at the moment of import and
+        # the mined patterns describe the import job, not the data. The metadata
+        # copy above is kept only for readers that already look for it.
+        body["validFrom"] = occurred_at
     if category:
         body["category"] = category
     return body
@@ -135,15 +142,24 @@ class MemoryResource:
         importance: int = 5,
         category: Optional[str] = None,
         metadata: Optional[dict] = None,
+        occurred_at: Optional[str] = None,
         project_id: Optional[str] = None,
     ) -> MemoryItem:
         """Seed a memory directly (knowledge an agent should have without
-        observing it first)."""
+        observing it first).
+
+        `occurred_at` is the ISO-8601 time this became true in the world (event
+        time). Set it when seeding anything back-dated — behavior mining buckets
+        patterns by it, and it defaults to now.
+        """
         body: dict = {"content": content, "type": enum_value(type), "scope": enum_value(scope), "importance": importance}
         if category:
             body["category"] = category
         if metadata:
             body["metadata"] = metadata
+        if occurred_at:
+            # Event time (when it became true in the world), not ingest time.
+            body["validFrom"] = occurred_at
         return self._t.post("/admin/memory", body, project_id)
 
     def search(
@@ -151,12 +167,15 @@ class MemoryResource:
         query: str,
         *,
         limit: int = 10,
+        offset: Optional[int] = None,
         scope: Any = None,
         status: Optional[str] = None,
         project_id: Optional[str] = None,
     ) -> List[SearchResult]:
         """Hybrid semantic + keyword search across every scope the project can see."""
         body: dict = {"query": query, "limit": limit}
+        if offset:
+            body["offset"] = offset
         if scope is not None:
             body["scope"] = enum_value(scope)
         if status:
@@ -194,6 +213,16 @@ class MemoryResource:
         project_id: Optional[str] = None,
     ) -> MemoryItem:
         return self._t.patch(f"/admin/memory/{memory_id}", _update_body(content, importance, type, status, scope), project_id)
+
+    def get(self, memory_id: str, *, project_id: Optional[str] = None) -> MemoryItem:
+        """Fetch a single memory by id.
+
+        The point-lookup counterpart to list()/search(): without it, a caller
+        holding a memory id (from a pattern's sourceMemoryIds, an audit log, a
+        webhook) had no way to resolve it and had to page list() hoping the row
+        was still on one.
+        """
+        return self._t.get(f"/admin/memory/{memory_id}", None, project_id)
 
     def delete(self, memory_id: str, *, project_id: Optional[str] = None) -> None:
         """Hard-delete a memory item. Gone is gone."""
@@ -311,9 +340,13 @@ class AsyncMemoryResource:
         importance: int = 5,
         category: Optional[str] = None,
         metadata: Optional[dict] = None,
+        occurred_at: Optional[str] = None,
         project_id: Optional[str] = None,
     ) -> MemoryItem:
         body: dict = {"content": content, "type": enum_value(type), "scope": enum_value(scope), "importance": importance}
+        if occurred_at:
+            # Event time (when it became true in the world), not ingest time.
+            body["validFrom"] = occurred_at
         if category:
             body["category"] = category
         if metadata:
@@ -325,11 +358,14 @@ class AsyncMemoryResource:
         query: str,
         *,
         limit: int = 10,
+        offset: Optional[int] = None,
         scope: Any = None,
         status: Optional[str] = None,
         project_id: Optional[str] = None,
     ) -> List[SearchResult]:
         body: dict = {"query": query, "limit": limit}
+        if offset:
+            body["offset"] = offset
         if scope is not None:
             body["scope"] = enum_value(scope)
         if status:
@@ -367,6 +403,10 @@ class AsyncMemoryResource:
         project_id: Optional[str] = None,
     ) -> MemoryItem:
         return await self._t.patch(f"/admin/memory/{memory_id}", _update_body(content, importance, type, status, scope), project_id)
+
+    async def get(self, memory_id: str, *, project_id: Optional[str] = None) -> MemoryItem:
+        """Fetch a single memory by id. See MemoryResource.get."""
+        return await self._t.get(f"/admin/memory/{memory_id}", None, project_id)
 
     async def delete(self, memory_id: str, *, project_id: Optional[str] = None) -> None:
         return await self._t.delete(f"/admin/memory/{memory_id}", project_id)
