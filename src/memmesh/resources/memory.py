@@ -14,6 +14,7 @@ from ..types import (
     SearchResult,
     Subject,
     enum_value,
+    render_procedure_content,
 )
 
 
@@ -174,6 +175,57 @@ class MemoryResource:
             # Event time (when it became true in the world), not ingest time.
             body["validFrom"] = occurred_at
         return self._t.post("/admin/memory", body, project_id)
+
+    def create_procedure(
+        self,
+        goal: str,
+        steps: List[dict],
+        *,
+        when_to_use: Optional[str] = None,
+        failure_modes: Optional[List[str]] = None,
+        category: Optional[str] = None,
+        scope: Any = MemoryScope.PROJECT,
+        importance: int = 7,
+        project_id: Optional[str] = None,
+    ) -> MemoryItem:
+        """Author a procedure — "how this job is done here" (goal + steps +
+        failure modes). Stored as a ``procedure`` memory: the structured shape
+        on ``metadata`` and the rendered how-to on ``content``, so retrieval
+        injects it as an explicit exemplar."""
+        metadata: dict = {"goal": goal, "steps": steps}
+        if when_to_use:
+            metadata["whenToUse"] = when_to_use
+        if failure_modes:
+            metadata["failureModes"] = failure_modes
+        content = render_procedure_content(
+            goal, steps, when_to_use=when_to_use, failure_modes=failure_modes
+        )
+        return self.create(
+            content,
+            type=MemoryType.PROCEDURE,
+            scope=scope,
+            importance=importance,
+            category=category,
+            metadata=metadata,
+            project_id=project_id,
+        )
+
+    def list_pending_review(
+        self, *, limit: Optional[int] = None, offset: Optional[int] = None, project_id: Optional[str] = None
+    ) -> List[MemoryItem]:
+        """The adjudication queue. Each row carries a ``reviewReason``:
+        ``pending`` / ``flagged`` / ``low_confidence`` / ``stale``."""
+        params = {k: v for k, v in {"limit": limit, "offset": offset}.items() if v is not None}
+        return self._t.get("/admin/memory/review", params, project_id)
+
+    def get_precedence(self, *, project_id: Optional[str] = None) -> dict:
+        """Which memory wins when two disagree. Falls back to the default
+        ladder (human-verified > local > licensed-brain > base) when unset."""
+        return self._t.get("/admin/memory/precedence", None, project_id)
+
+    def set_precedence(self, policy: dict, *, project_id: Optional[str] = None) -> dict:
+        """Save the precedence policy. Requires the Memory Steward role."""
+        return self._t.put("/admin/memory/precedence", policy, project_id)
 
     def search(
         self,
@@ -365,6 +417,52 @@ class AsyncMemoryResource:
         if metadata:
             body["metadata"] = metadata
         return await self._t.post("/admin/memory", body, project_id)
+
+    async def create_procedure(
+        self,
+        goal: str,
+        steps: List[dict],
+        *,
+        when_to_use: Optional[str] = None,
+        failure_modes: Optional[List[str]] = None,
+        category: Optional[str] = None,
+        scope: Any = MemoryScope.PROJECT,
+        importance: int = 7,
+        project_id: Optional[str] = None,
+    ) -> MemoryItem:
+        """Author a procedure (async). See :meth:`MemoryResource.create_procedure`."""
+        metadata: dict = {"goal": goal, "steps": steps}
+        if when_to_use:
+            metadata["whenToUse"] = when_to_use
+        if failure_modes:
+            metadata["failureModes"] = failure_modes
+        content = render_procedure_content(
+            goal, steps, when_to_use=when_to_use, failure_modes=failure_modes
+        )
+        return await self.create(
+            content,
+            type=MemoryType.PROCEDURE,
+            scope=scope,
+            importance=importance,
+            category=category,
+            metadata=metadata,
+            project_id=project_id,
+        )
+
+    async def list_pending_review(
+        self, *, limit: Optional[int] = None, offset: Optional[int] = None, project_id: Optional[str] = None
+    ) -> List[MemoryItem]:
+        """The adjudication queue (async). Rows carry a ``reviewReason``."""
+        params = {k: v for k, v in {"limit": limit, "offset": offset}.items() if v is not None}
+        return await self._t.get("/admin/memory/review", params, project_id)
+
+    async def get_precedence(self, *, project_id: Optional[str] = None) -> dict:
+        """Read the precedence policy (async)."""
+        return await self._t.get("/admin/memory/precedence", None, project_id)
+
+    async def set_precedence(self, policy: dict, *, project_id: Optional[str] = None) -> dict:
+        """Save the precedence policy (async). Requires the Memory Steward role."""
+        return await self._t.put("/admin/memory/precedence", policy, project_id)
 
     async def search(
         self,

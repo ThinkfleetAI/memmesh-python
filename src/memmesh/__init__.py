@@ -21,9 +21,12 @@ from .errors import (
 )
 from .types import (
     FeedbackRating,
+    MemoryProvenanceTier,
+    MemoryReviewReason,
     MemoryScope,
     MemoryType,
     Subject,
+    render_procedure_content,
     subject,
 )
 
@@ -35,6 +38,9 @@ __all__ = [
     "subject",
     "MemoryType",
     "MemoryScope",
+    "MemoryReviewReason",
+    "MemoryProvenanceTier",
+    "render_procedure_content",
     "FeedbackRating",
     "MemMeshError",
     "AuthenticationError",

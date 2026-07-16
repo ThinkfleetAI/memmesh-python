@@ -124,6 +124,9 @@ class Transport(_BaseTransport):
     def post(self, path: str, json: Any = None, project_id: Optional[str] = None) -> Any:
         return self.request("POST", path, json=json, project_id=project_id)
 
+    def put(self, path: str, json: Any = None, project_id: Optional[str] = None) -> Any:
+        return self.request("PUT", path, json=json, project_id=project_id)
+
     def patch(self, path: str, json: Any = None, project_id: Optional[str] = None) -> Any:
         return self.request("PATCH", path, json=json, project_id=project_id)
 
@@ -183,6 +186,9 @@ class AsyncTransport(_BaseTransport):
 
     async def post(self, path: str, json: Any = None, project_id: Optional[str] = None) -> Any:
         return await self.request("POST", path, json=json, project_id=project_id)
+
+    async def put(self, path: str, json: Any = None, project_id: Optional[str] = None) -> Any:
+        return await self.request("PUT", path, json=json, project_id=project_id)
 
     async def patch(self, path: str, json: Any = None, project_id: Optional[str] = None) -> Any:
         return await self.request("PATCH", path, json=json, project_id=project_id)

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "thinkfleet-memmesh"
-version = "0.2.0"
+version = "0.3.0"
 description = "MemMesh — memory + prediction for AI agents. Official Python SDK."
 readme = "README.md"
 requires-python = ">=3.9"
