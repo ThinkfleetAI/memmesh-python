@@ -111,7 +111,20 @@ class MemoryResource:
     ) -> MemoryItem:
         """Record that *something happened*. The engine decides what to keep,
         mines it into patterns, and the prediction layer reads it. The primary
-        ingestion call for agents."""
+        ingestion call for agents.
+
+        Pass structured fields the miner reads via ``metadata``. In particular
+        the RFM Monetary score sums a numeric ``amount`` (or ``value``/``total``,
+        or a ``lineItems`` array) — a price written only into ``content`` is not
+        parsed, so set it explicitly::
+
+            mm.memory.observe(
+                "Order — pizza",
+                subject=subject("contact", "sarah"),
+                activity_type="order_placed",
+                metadata={"amount": 42.0},
+            )
+        """
         body = _observe_body(content, subject, type, scope, importance, category, activity_type, occurred_at, metadata)
         return self._t.post("/admin/memory", body, project_id)
 
