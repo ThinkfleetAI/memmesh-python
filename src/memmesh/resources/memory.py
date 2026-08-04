@@ -2,15 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from typing import Any, List, Optional, Union
 
+from .._pagination import (
+    MAX_PAGE_SIZE,
+    AsyncOffsetPaginator,
+    SyncOffsetPaginator,
+    apaginate,
+    paginate,
+)
 from ..types import (
+    ExplainResult,
     FeedbackRating,
     IngestMediaResult,
+    MemoryFeedback,
     MemoryItem,
     MemoryScope,
     MemoryType,
+    ObserveResponse,
     SearchResult,
     Subject,
     enum_value,
@@ -37,6 +48,44 @@ def _media_body(
     if source:
         body["source"] = source
     return body
+
+
+def _attachment_body(
+    data: Union[bytes, str],
+    subject: Subject,
+    mime_type: str,
+    file_name: Optional[str],
+    content: Optional[str],
+    activity_type: Optional[str],
+    occurred_at: Optional[str],
+    importance: Optional[int],
+    metadata: Optional[dict],
+) -> dict:
+    data_b64 = data if isinstance(data, str) else base64.b64encode(data).decode("ascii")
+    raw = {
+        "subject": subject,
+        "mimeType": mime_type,
+        "fileName": file_name,
+        "content": content,
+        "activityType": activity_type,
+        "occurredAt": occurred_at,
+        "importance": importance,
+        "metadata": metadata,
+        "dataBase64": data_b64,
+    }
+    return {k: v for k, v in raw.items() if v is not None}
+
+
+def _explain_source_ids(memory: MemoryItem) -> List[str]:
+    """Pull source-memory ids off a derived item's metadata. Accepts both the
+    camelCase the Rust engine emits and the snake_case legacy items carry."""
+    md = memory.get("metadata") or {}
+    raw_ids = md.get("sourceMemoryIds")
+    if raw_ids is None:
+        raw_ids = md.get("source_memory_ids") or []
+    if not isinstance(raw_ids, list):
+        return []
+    return [x for x in raw_ids if isinstance(x, str)]
 
 
 def _observe_body(
@@ -72,6 +121,24 @@ def _observe_body(
     return body
 
 
+def _observe_text_body(text: str, role: str, occurred_at: Optional[str]) -> dict:
+    """Body for the raw-text observe path — the engine's noise filter runs over
+    ``text`` and decides what (if anything) to keep."""
+    body: dict = {"text": text, "role": role}
+    if occurred_at:
+        body["occurredAt"] = occurred_at
+    return body
+
+
+def _observe_response(resp: Any) -> ObserveResponse:
+    """Normalize the engine's ``/memory/observe`` payload (camelCase
+    ``candidateCount``) into an :class:`ObserveResponse`."""
+    data = resp or {}
+    saved = data.get("saved") or []
+    count = data.get("candidateCount")
+    return ObserveResponse(saved=saved, candidate_count=count if count is not None else len(saved))
+
+
 def _update_body(content, importance, type, status, scope) -> dict:
     raw = {
         "content": content,
@@ -91,8 +158,10 @@ class MemoryResource:
 
     def observe(
         self,
-        content: str,
+        content: Optional[str] = None,
         *,
+        text: Optional[str] = None,
+        role: str = "user",
         subject: Optional[Subject] = None,
         type: Any = MemoryType.EVENT,
         scope: Any = MemoryScope.PROJECT,
@@ -102,15 +171,22 @@ class MemoryResource:
         occurred_at: Optional[str] = None,
         metadata: Optional[dict] = None,
         project_id: Optional[str] = None,
-    ) -> MemoryItem:
-        """Record that *something happened*. The engine decides what to keep,
-        mines it into patterns, and the prediction layer reads it. The primary
-        ingestion call for agents.
+    ) -> ObserveResponse:
+        """Record that *something happened*. The primary ingestion call for agents.
 
-        Pass structured fields the miner reads via ``metadata``. In particular
-        the RFM Monetary score sums a numeric ``amount`` (or ``value``/``total``,
-        or a ``lineItems`` array) — a price written only into ``content`` is not
-        parsed, so set it explicitly::
+        **Preferred:** hand the engine the raw turn via ``text`` (with an optional
+        ``role``, default ``"user"``). It runs through the engine's noise filter
+        (extract → dedupe → budget) and only the memories worth keeping are
+        stored — filler comes back as ``saved == []`` (success, not an error)::
+
+            mm.memory.observe(text="Moved to the annual plan, prefers email.")
+
+        **Legacy:** pass a pre-decided fact via ``content`` and it is stored
+        verbatim (no extraction), then wrapped as a single-item response. Pass
+        structured fields the miner reads via ``metadata`` — in particular the RFM
+        Monetary score sums a numeric ``amount`` (or ``value``/``total``, or a
+        ``lineItems`` array), so a price written only into ``content`` is not
+        parsed; set it explicitly::
 
             mm.memory.observe(
                 "Order — pizza",
@@ -118,9 +194,17 @@ class MemoryResource:
                 activity_type="order_placed",
                 metadata={"amount": 42.0},
             )
+
+        Either ``text`` (preferred) or ``content`` is required.
         """
-        body = _observe_body(content, subject, type, scope, importance, category, activity_type, occurred_at, metadata)
-        return self._t.post("/admin/memory", body, project_id)
+        if text is not None and text.strip():
+            body = _observe_text_body(text, role, occurred_at)
+            return _observe_response(self._t.post("/memory/observe", body, project_id))
+        if content is not None and content.strip():
+            body = _observe_body(content, subject, type, scope, importance, category, activity_type, occurred_at, metadata)
+            item = self._t.post("/admin/memory", body, project_id)
+            return ObserveResponse(saved=[item], candidate_count=1)
+        raise ValueError("observe requires `text` (preferred) or `content`")
 
     def ingest_media(
         self,
@@ -139,6 +223,75 @@ class MemoryResource:
         Requires multimodal to be enabled on the engine."""
         body = _media_body(media, mime_type, user_id, agent_id, session_id, source)
         return self._t.post("/memory/media", body, project_id)
+
+    def observe_image(
+        self,
+        subject: Subject,
+        image: Union[bytes, str],
+        mime_type: str,
+        *,
+        file_name: Optional[str] = None,
+        content: Optional[str] = None,
+        activity_type: Optional[str] = None,
+        occurred_at: Optional[str] = None,
+        importance: Optional[int] = None,
+        metadata: Optional[dict] = None,
+        project_id: Optional[str] = None,
+    ) -> MemoryItem:
+        """Record an image as a memory item. The bytes are uploaded as a
+        MEMORY_ATTACHMENT file and a memory is created with the subject +
+        activity metadata you provide. Pass ``content`` for the searchable
+        caption — the engine doesn't auto-caption yet. ``image`` accepts raw
+        bytes or a pre-encoded base64 string."""
+        body = _attachment_body(
+            image, subject, mime_type, file_name, content, activity_type, occurred_at, importance, metadata
+        )
+        return self._t.post("/memory/attachments", body, project_id)
+
+    def observe_voice(
+        self,
+        subject: Subject,
+        audio: Union[bytes, str],
+        mime_type: str,
+        *,
+        file_name: Optional[str] = None,
+        content: Optional[str] = None,
+        activity_type: Optional[str] = None,
+        occurred_at: Optional[str] = None,
+        importance: Optional[int] = None,
+        metadata: Optional[dict] = None,
+        project_id: Optional[str] = None,
+    ) -> MemoryItem:
+        """Record a voice clip / audio file as a memory item. Pass ``content``
+        for the searchable transcript — the engine doesn't auto-transcribe yet.
+        ``audio`` accepts raw bytes or a pre-encoded base64 string."""
+        body = _attachment_body(
+            audio, subject, mime_type, file_name, content, activity_type, occurred_at, importance, metadata
+        )
+        return self._t.post("/memory/attachments", body, project_id)
+
+    def observe_document(
+        self,
+        subject: Subject,
+        document: Union[bytes, str],
+        mime_type: str,
+        *,
+        file_name: Optional[str] = None,
+        content: Optional[str] = None,
+        activity_type: Optional[str] = None,
+        occurred_at: Optional[str] = None,
+        importance: Optional[int] = None,
+        metadata: Optional[dict] = None,
+        project_id: Optional[str] = None,
+    ) -> MemoryItem:
+        """Record a document (PDF, Word, Markdown, plain text, ...) as a memory
+        item. Pass ``content`` for the searchable text — the engine doesn't
+        auto-extract from PDFs/Office files yet, so parse first. ``document``
+        accepts raw bytes or a pre-encoded base64 string."""
+        body = _attachment_body(
+            document, subject, mime_type, file_name, content, activity_type, occurred_at, importance, metadata
+        )
+        return self._t.post("/memory/attachments", body, project_id)
 
     def create(
         self,
@@ -247,6 +400,77 @@ class MemoryResource:
         }
         return self._t.get("/admin/memory", params, project_id)
 
+    def get(self, memory_id: str, *, project_id: Optional[str] = None) -> MemoryItem:
+        """Fetch a single memory by id."""
+        return self._t.get(f"/admin/memory/{memory_id}", None, project_id)
+
+    def list_all(
+        self,
+        *,
+        scope: Any = None,
+        status: Optional[str] = None,
+        type: Any = None,
+        page_size: int = MAX_PAGE_SIZE,
+        project_id: Optional[str] = None,
+    ) -> SyncOffsetPaginator[MemoryItem]:
+        """Walk every memory matching the filters, transparently paging under the
+        hood. Returns an iterator (``for m in mm.memory.list_all(...)``) so a
+        large corpus never has to fit in memory. Pages by offset over a
+        newest-first list, so writes landing mid-walk can shift rows across page
+        boundaries — fine for browsing/export."""
+
+        def fetch(limit: int, offset: int) -> List[MemoryItem]:
+            return self.list(
+                scope=scope, status=status, type=type, limit=limit, offset=offset, project_id=project_id
+            )
+
+        return paginate(fetch, page_size=page_size)
+
+    def list_platform(
+        self,
+        *,
+        status: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        project_id: Optional[str] = None,
+    ) -> List[MemoryItem]:
+        """List platform-level memories (shared across all projects on this
+        platform)."""
+        params = {k: v for k, v in {"status": status, "limit": limit, "offset": offset}.items() if v is not None}
+        return self._t.get("/admin/memory/platform", params, project_id)
+
+    def mine(
+        self,
+        *,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        project_id: Optional[str] = None,
+    ) -> List[MemoryItem]:
+        """List the current user's memories across all scopes."""
+        params = {k: v for k, v in {"limit": limit, "offset": offset}.items() if v is not None}
+        return self._t.get("/memory/mine", params, project_id)
+
+    def explain(self, memory_id: str, *, project_id: Optional[str] = None) -> ExplainResult:
+        """Right-to-explanation. For a derived item (e.g. ``behavior_pattern``),
+        resolve the raw source memories that produced it from
+        ``metadata.sourceMemoryIds``. For any other item, returns the item with
+        an empty ``sourceMemories``. Sources since deleted/superseded are skipped
+        rather than failing the whole call."""
+        memory = self.get(memory_id, project_id=project_id)
+        ids = _explain_source_ids(memory)
+        sources: List[MemoryItem] = []
+        for source_id in ids:
+            try:
+                sources.append(self.get(source_id, project_id=project_id))
+            except Exception:
+                continue
+        return {"memory": memory, "sourceMemories": sources}
+
+    def list_feedback(self, memory_id: str, *, project_id: Optional[str] = None) -> List[MemoryFeedback]:
+        """List the feedback records attached to a memory item — useful when
+        inspecting auto-flagged items to decide whether to confirm or reject."""
+        return self._t.get(f"/admin/memory/{memory_id}/feedback", None, project_id)
+
     def update(
         self,
         memory_id: str,
@@ -302,7 +526,7 @@ class MemoryResource:
             body["subject"] = subject
         if window_days is not None:
             body["windowDays"] = window_days
-        return self._t.post("/admin/memory/consolidate", body, project_id)
+        return self._t.post("/admin/memory/llm-consolidate", body, project_id)
 
     def dedup(self, *, threshold: Optional[float] = None, scan_limit: Optional[int] = None, project_id: Optional[str] = None) -> dict:
         """Semantic dedup: collapse near-duplicates, keep the strongest, supersede the rest."""
@@ -337,8 +561,10 @@ class AsyncMemoryResource:
 
     async def observe(
         self,
-        content: str,
+        content: Optional[str] = None,
         *,
+        text: Optional[str] = None,
+        role: str = "user",
         subject: Optional[Subject] = None,
         type: Any = MemoryType.EVENT,
         scope: Any = MemoryScope.PROJECT,
@@ -348,9 +574,18 @@ class AsyncMemoryResource:
         occurred_at: Optional[str] = None,
         metadata: Optional[dict] = None,
         project_id: Optional[str] = None,
-    ) -> MemoryItem:
-        body = _observe_body(content, subject, type, scope, importance, category, activity_type, occurred_at, metadata)
-        return await self._t.post("/admin/memory", body, project_id)
+    ) -> ObserveResponse:
+        """Async mirror of :meth:`MemoryResource.observe`. Prefer ``text`` (raw
+        turn through the engine's noise filter); ``content`` stays for legacy
+        verbatim stores. Either ``text`` or ``content`` is required."""
+        if text is not None and text.strip():
+            body = _observe_text_body(text, role, occurred_at)
+            return _observe_response(await self._t.post("/memory/observe", body, project_id))
+        if content is not None and content.strip():
+            body = _observe_body(content, subject, type, scope, importance, category, activity_type, occurred_at, metadata)
+            item = await self._t.post("/admin/memory", body, project_id)
+            return ObserveResponse(saved=[item], candidate_count=1)
+        raise ValueError("observe requires `text` (preferred) or `content`")
 
     async def ingest_media(
         self,
@@ -366,6 +601,66 @@ class AsyncMemoryResource:
         """Async mirror of :meth:`MemoryResource.ingest_media`."""
         body = _media_body(media, mime_type, user_id, agent_id, session_id, source)
         return await self._t.post("/memory/media", body, project_id)
+
+    async def observe_image(
+        self,
+        subject: Subject,
+        image: Union[bytes, str],
+        mime_type: str,
+        *,
+        file_name: Optional[str] = None,
+        content: Optional[str] = None,
+        activity_type: Optional[str] = None,
+        occurred_at: Optional[str] = None,
+        importance: Optional[int] = None,
+        metadata: Optional[dict] = None,
+        project_id: Optional[str] = None,
+    ) -> MemoryItem:
+        """Async mirror of :meth:`MemoryResource.observe_image`."""
+        body = _attachment_body(
+            image, subject, mime_type, file_name, content, activity_type, occurred_at, importance, metadata
+        )
+        return await self._t.post("/memory/attachments", body, project_id)
+
+    async def observe_voice(
+        self,
+        subject: Subject,
+        audio: Union[bytes, str],
+        mime_type: str,
+        *,
+        file_name: Optional[str] = None,
+        content: Optional[str] = None,
+        activity_type: Optional[str] = None,
+        occurred_at: Optional[str] = None,
+        importance: Optional[int] = None,
+        metadata: Optional[dict] = None,
+        project_id: Optional[str] = None,
+    ) -> MemoryItem:
+        """Async mirror of :meth:`MemoryResource.observe_voice`."""
+        body = _attachment_body(
+            audio, subject, mime_type, file_name, content, activity_type, occurred_at, importance, metadata
+        )
+        return await self._t.post("/memory/attachments", body, project_id)
+
+    async def observe_document(
+        self,
+        subject: Subject,
+        document: Union[bytes, str],
+        mime_type: str,
+        *,
+        file_name: Optional[str] = None,
+        content: Optional[str] = None,
+        activity_type: Optional[str] = None,
+        occurred_at: Optional[str] = None,
+        importance: Optional[int] = None,
+        metadata: Optional[dict] = None,
+        project_id: Optional[str] = None,
+    ) -> MemoryItem:
+        """Async mirror of :meth:`MemoryResource.observe_document`."""
+        body = _attachment_body(
+            document, subject, mime_type, file_name, content, activity_type, occurred_at, importance, metadata
+        )
+        return await self._t.post("/memory/attachments", body, project_id)
 
     async def create(
         self,
@@ -466,6 +761,76 @@ class AsyncMemoryResource:
         }
         return await self._t.get("/admin/memory", params, project_id)
 
+    async def get(self, memory_id: str, *, project_id: Optional[str] = None) -> MemoryItem:
+        """Fetch a single memory by id (async)."""
+        return await self._t.get(f"/admin/memory/{memory_id}", None, project_id)
+
+    def list_all(
+        self,
+        *,
+        scope: Any = None,
+        status: Optional[str] = None,
+        type: Any = None,
+        page_size: int = MAX_PAGE_SIZE,
+        project_id: Optional[str] = None,
+    ) -> AsyncOffsetPaginator[MemoryItem]:
+        """Async mirror of :meth:`MemoryResource.list_all`. Returns an async
+        iterator (``async for m in mm.memory.list_all(...)``)."""
+
+        async def fetch(limit: int, offset: int) -> List[MemoryItem]:
+            return await self.list(
+                scope=scope, status=status, type=type, limit=limit, offset=offset, project_id=project_id
+            )
+
+        return apaginate(fetch, page_size=page_size)
+
+    async def list_platform(
+        self,
+        *,
+        status: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        project_id: Optional[str] = None,
+    ) -> List[MemoryItem]:
+        """List platform-level memories (async)."""
+        params = {k: v for k, v in {"status": status, "limit": limit, "offset": offset}.items() if v is not None}
+        return await self._t.get("/admin/memory/platform", params, project_id)
+
+    async def mine(
+        self,
+        *,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        project_id: Optional[str] = None,
+    ) -> List[MemoryItem]:
+        """List the current user's memories across all scopes (async)."""
+        params = {k: v for k, v in {"limit": limit, "offset": offset}.items() if v is not None}
+        return await self._t.get("/memory/mine", params, project_id)
+
+    async def explain(self, memory_id: str, *, project_id: Optional[str] = None) -> ExplainResult:
+        """Async mirror of :meth:`MemoryResource.explain`. Source lookups run
+        concurrently; sources since deleted/superseded are skipped."""
+        memory = await self.get(memory_id, project_id=project_id)
+        ids = _explain_source_ids(memory)
+        if not ids:
+            return {"memory": memory, "sourceMemories": []}
+
+        async def _fetch(source_id: str) -> Optional[MemoryItem]:
+            try:
+                return await self.get(source_id, project_id=project_id)
+            except Exception:
+                return None
+
+        results = await asyncio.gather(*[_fetch(source_id) for source_id in ids])
+        sources = [m for m in results if m is not None]
+        return {"memory": memory, "sourceMemories": sources}
+
+    async def list_feedback(
+        self, memory_id: str, *, project_id: Optional[str] = None
+    ) -> List[MemoryFeedback]:
+        """List the feedback records attached to a memory item (async)."""
+        return await self._t.get(f"/admin/memory/{memory_id}/feedback", None, project_id)
+
     async def update(
         self,
         memory_id: str,
@@ -515,7 +880,7 @@ class AsyncMemoryResource:
             body["subject"] = subject
         if window_days is not None:
             body["windowDays"] = window_days
-        return await self._t.post("/admin/memory/consolidate", body, project_id)
+        return await self._t.post("/admin/memory/llm-consolidate", body, project_id)
 
     async def dedup(self, *, threshold: Optional[float] = None, scan_limit: Optional[int] = None, project_id: Optional[str] = None) -> dict:
         body = {k: v for k, v in {"threshold": threshold, "scanLimit": scan_limit}.items() if v is not None}

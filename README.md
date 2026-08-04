@@ -5,7 +5,7 @@ forecasts what happens next with a calibrated confidence score, and stays
 compliant — everything mem0 does, plus a prediction layer it has no answer for.
 
 ```bash
-pip install thinkfleet-memmesh   # the import name is still `memmesh`
+pip install memmesh
 ```
 
 ## Quickstart
@@ -15,11 +15,9 @@ from memmesh import MemMesh, subject
 
 mm = MemMesh(api_key="sk-...", project_id="proj_...")
 
-# 1 — Observe: feed it anything; the engine decides what to keep
-mm.observe(
-    "Moved to the annual plan, prefers email over SMS.",
-    subject=subject("contact", "user_42"),
-)
+# 1 — Observe: feed it the raw turn; the engine's noise filter decides what to keep
+res = mm.observe(text="Moved to the annual plan, prefers email over SMS.")
+print(res.saved, res.candidate_count)  # filler comes back as saved == []
 
 # 2 — Recall: hybrid semantic + keyword search
 hits = mm.search("billing preferences", limit=5)
