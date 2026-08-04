@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "thinkfleet-memmesh"
+name = "memmesh"
 version = "0.3.0"
 description = "MemMesh — memory + prediction for AI agents. Official Python SDK."
 readme = "README.md"

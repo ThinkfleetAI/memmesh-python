@@ -2,12 +2,29 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, List, Optional
 
-from ._http import AsyncTransport, Transport
+import httpx
+
+from ._http import (
+    AsyncTransport,
+    RequestInterceptor,
+    ResponseInterceptor,
+    Transport,
+)
+from .resources.alerts import AlertsResource, AsyncAlertsResource
+from .resources.behaviors import AsyncBehaviorsResource, BehaviorsResource
+from .resources.brains import AsyncBrainsResource, BrainsResource
+from .resources.compliance import AsyncComplianceResource, ComplianceResource
+from .resources.consent import AsyncConsentResource, ConsentResource
+from .resources.events import AsyncEventsResource, EventsResource
+from .resources.financial import AsyncFinancialResource, FinancialResource
+from .resources.health import AsyncHealthResource, HealthResource
 from .resources.lattice import AsyncLatticeResource, LatticeResource
 from .resources.context import AsyncContextResource, ContextResource
+from .resources.learning import AsyncLearningResource, LearningResource
 from .resources.memory import AsyncMemoryResource, MemoryResource
+from .resources.typed import AsyncTypedAttributesResource, TypedAttributesResource
 
 # The live API today. Moves to https://api.memmesh.ai as the rebrand lands;
 # override with ``base_url=...`` (or point at your self-hosted engine).
@@ -33,11 +50,34 @@ class MemMesh:
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = 30.0,
         max_retries: int = 2,
+        request_interceptors: Optional[List[RequestInterceptor]] = None,
+        response_interceptors: Optional[List[ResponseInterceptor]] = None,
+        http_client: Optional[httpx.Client] = None,
+        transport: Optional[Transport] = None,
     ) -> None:
-        self._t = Transport(api_key, project_id, base_url, timeout, max_retries)
+        self._t = transport or Transport(
+            api_key,
+            project_id,
+            base_url,
+            timeout,
+            max_retries,
+            request_interceptors=request_interceptors,
+            response_interceptors=response_interceptors,
+            http_client=http_client,
+        )
         self.memory = MemoryResource(self._t)
         self.lattice = LatticeResource(self._t)
         self.context = ContextResource(self._t)
+        self.learning = LearningResource(self._t)
+        self.behaviors = BehaviorsResource(self._t)
+        self.brains = BrainsResource(self._t)
+        self.consent = ConsentResource(self.memory)
+        self.alerts = AlertsResource(self._t)
+        self.events = EventsResource(self._t)
+        self.typed = TypedAttributesResource(self._t)
+        self.health = HealthResource(self._t)
+        self.financial = FinancialResource(self._t)
+        self.compliance = ComplianceResource(self._t)
 
     # -- convenience shortcuts to the most-used calls --------------------
     def observe(self, *args: Any, **kwargs: Any) -> Any:
@@ -78,11 +118,34 @@ class AsyncMemMesh:
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = 30.0,
         max_retries: int = 2,
+        request_interceptors: Optional[List[RequestInterceptor]] = None,
+        response_interceptors: Optional[List[ResponseInterceptor]] = None,
+        http_client: Optional[httpx.AsyncClient] = None,
+        transport: Optional[AsyncTransport] = None,
     ) -> None:
-        self._t = AsyncTransport(api_key, project_id, base_url, timeout, max_retries)
+        self._t = transport or AsyncTransport(
+            api_key,
+            project_id,
+            base_url,
+            timeout,
+            max_retries,
+            request_interceptors=request_interceptors,
+            response_interceptors=response_interceptors,
+            http_client=http_client,
+        )
         self.memory = AsyncMemoryResource(self._t)
         self.lattice = AsyncLatticeResource(self._t)
         self.context = AsyncContextResource(self._t)
+        self.learning = AsyncLearningResource(self._t)
+        self.behaviors = AsyncBehaviorsResource(self._t)
+        self.brains = AsyncBrainsResource(self._t)
+        self.consent = AsyncConsentResource(self.memory)
+        self.alerts = AsyncAlertsResource(self._t)
+        self.events = AsyncEventsResource(self._t)
+        self.typed = AsyncTypedAttributesResource(self._t)
+        self.health = AsyncHealthResource(self._t)
+        self.financial = AsyncFinancialResource(self._t)
+        self.compliance = AsyncComplianceResource(self._t)
 
     async def observe(self, *args: Any, **kwargs: Any) -> Any:
         return await self.memory.observe(*args, **kwargs)

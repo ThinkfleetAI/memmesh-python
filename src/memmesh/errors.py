@@ -1,12 +1,15 @@
 """Exception hierarchy for the MemMesh SDK.
 
 Mirrors the TypeScript SDK's error classes so behavior is consistent across
-languages. Every error carries the HTTP ``status_code`` and raw ``body``.
+languages. Every error carries the HTTP ``status_code`` and raw ``body``; where
+the server returns a JSON error envelope (``{message, code, params}``) those are
+surfaced on ``code`` / ``params`` too.
 """
 
 from __future__ import annotations
 
-from typing import Optional
+import json as _json
+from typing import Any, Mapping, Optional
 
 
 class MemMeshError(Exception):
@@ -17,10 +20,15 @@ class MemMeshError(Exception):
         message: str,
         status_code: Optional[int] = None,
         body: Optional[str] = None,
+        *,
+        code: Optional[str] = None,
+        params: Optional[dict] = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.body = body
+        self.code = code
+        self.params = params
 
 
 class AuthenticationError(MemMeshError):
@@ -36,11 +44,29 @@ class NotFoundError(MemMeshError):
 
 
 class ValidationError(MemMeshError):
-    """400 / 422 — the request body or params failed validation."""
+    """400 / 422 — the request body or params failed validation. Field-level
+    detail (when the server sends it) is on :attr:`params`."""
 
 
 class RateLimitError(MemMeshError):
-    """429 — too many requests. The client retries these automatically."""
+    """429 — too many requests. The client retries these automatically.
+
+    :attr:`retry_after` is the ``Retry-After`` hint in seconds (``None`` when the
+    server didn't send one).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        status_code: Optional[int] = None,
+        body: Optional[str] = None,
+        *,
+        code: Optional[str] = None,
+        params: Optional[dict] = None,
+        retry_after: Optional[float] = None,
+    ) -> None:
+        super().__init__(message, status_code, body, code=code, params=params)
+        self.retry_after = retry_after
 
 
 class ServerError(MemMeshError):
@@ -55,19 +81,64 @@ class APIConnectionError(MemMeshError):
     """The request never reached the server (DNS, TLS, connection refused)."""
 
 
-def error_from_response(status: int, text: str) -> MemMeshError:
-    """Map an HTTP status code to the matching exception class."""
-    message = text or f"HTTP {status}"
+def _parse_body(text: str) -> tuple[str, Optional[str], Optional[dict]]:
+    """Pull ``message`` / ``code`` / ``params`` out of a JSON error envelope,
+    mirroring the TS client. Falls back to the raw text as the message."""
+    message = text
+    code: Optional[str] = None
+    params: Optional[dict] = None
+    if text:
+        try:
+            parsed = _json.loads(text)
+        except (ValueError, TypeError):
+            return text, None, None
+        if isinstance(parsed, dict):
+            message = parsed.get("message") or parsed.get("error") or text
+            raw_code = parsed.get("code")
+            code = raw_code if isinstance(raw_code, str) else None
+            raw_params = parsed.get("params")
+            params = raw_params if isinstance(raw_params, dict) else None
+    return message, code, params
+
+
+def _retry_after_seconds(headers: Optional[Mapping[str, Any]]) -> Optional[float]:
+    if not headers:
+        return None
+    raw = headers.get("Retry-After") or headers.get("retry-after")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        return None
+
+
+def error_from_response(
+    status: int,
+    text: str,
+    headers: Optional[Mapping[str, Any]] = None,
+) -> MemMeshError:
+    """Map an HTTP status code (+ optional body/headers) to the matching
+    exception class."""
+    parsed_message, code, params = _parse_body(text)
+    message = parsed_message or f"HTTP {status}"
     if status == 401:
-        return AuthenticationError(message, status, text)
+        return AuthenticationError(message, status, text, code=code, params=params)
     if status == 403:
-        return AuthorizationError(message, status, text)
+        return AuthorizationError(message, status, text, code=code, params=params)
     if status == 404:
-        return NotFoundError(message, status, text)
+        return NotFoundError(message, status, text, code=code, params=params)
     if status in (400, 422):
-        return ValidationError(message, status, text)
+        return ValidationError(message, status, text, code=code, params=params)
     if status == 429:
-        return RateLimitError(message, status, text)
+        return RateLimitError(
+            message,
+            status,
+            text,
+            code=code,
+            params=params,
+            retry_after=_retry_after_seconds(headers),
+        )
     if status >= 500:
-        return ServerError(message, status, text)
-    return MemMeshError(message, status, text)
+        return ServerError(message, status, text, code=code, params=params)
+    return MemMeshError(message, status, text, code=code, params=params)
