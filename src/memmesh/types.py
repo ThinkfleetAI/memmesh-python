@@ -130,6 +130,49 @@ class ExplainResult(TypedDict):
     sourceMemories: List[MemoryItem]
 
 
+#: A knowledge-graph entity — a resolved thing (person, org, product, concept)
+#: that extraction filed under a ``canonicalName``, with aliases resolving to it.
+MemoryEntity = Dict[str, Any]
+
+#: A typed relationship between two entities, e.g.
+#: ``{"subjectId": ..., "predicate": "works_at", "objectId": ...}``. The object
+#: is either another entity (``objectId``) or a literal (``objectLiteral``).
+#:
+#: Bi-temporal, on two distinct axes: ``validFrom``/``validTo`` is when the fact
+#: was TRUE, while ``expiredAt`` is when the graph stopped BELIEVING it because
+#: a contradicting edge superseded it.
+MemoryEdge = Dict[str, Any]
+
+
+class GraphStats(TypedDict, total=False):
+    """Aggregate knowledge-graph counts, from ``memory.graph.stats()``.
+
+    ``memoriesWithEdges`` against your total memory count is the useful ratio:
+    it says how much of what you remember made it into the graph rather than
+    remaining an isolated embedding. A low ratio usually means extraction is
+    off, or the corpus is prose the extractor found no relations in — check
+    ``extraction`` before concluding the latter.
+    """
+
+    entityCount: int
+    edgeCount: int
+    #: Distinct memories that produced at least one edge.
+    memoriesWithEdges: int
+    retiredEntities: int
+    retiredEdges: int
+    #: Live entity counts keyed by entity type.
+    entitiesByType: Dict[str, int]
+    #: Whether KG extraction is on, platform-wide and for this project.
+    extraction: Dict[str, bool]
+
+
+class EntityWithEdges(TypedDict):
+    """An entity plus its 1-hop neighbourhood, from ``memory.graph.get_entity()``."""
+
+    entity: Optional[MemoryEntity]
+    edges: List[MemoryEdge]
+
+
 def enum_value(x: Any) -> Any:
     """Return ``x.value`` for enums, else ``x`` — lets callers pass either
     the enum or a raw string."""
