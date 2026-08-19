@@ -134,14 +134,19 @@ class ExplainResult(TypedDict):
 #: that extraction filed under a ``canonicalName``, with aliases resolving to it.
 MemoryEntity = Dict[str, Any]
 
-#: A typed relationship between two entities, e.g.
-#: ``{"subjectId": ..., "predicate": "works_at", "objectId": ...}``. The object
-#: is either another entity (``objectId``) or a literal (``objectLiteral``).
+#: An edge as the READ routes return it — hydrated, not the raw ``memory_edge``
+#: row. ``subject`` and ``object`` are resolved entity dicts rather than ids,
+#: plus a ``hop`` counter::
 #:
-#: Bi-temporal, on two distinct axes: ``validFrom``/``validTo`` is when the fact
-#: was TRUE, while ``expiredAt`` is when the graph stopped BELIEVING it because
-#: a contradicting edge superseded it.
-MemoryEdge = Dict[str, Any]
+#:     {"id": ..., "subject": {...}, "predicate": "reported_metric",
+#:      "object": {...} | None, "objectLiteral": "NVDA" | None,
+#:      "weight": 0.85, "hop": 0}
+#:
+#: This is the server's ``GraphTraversalEdge``, returned by ``list_edges``,
+#: ``traverse``, and the ``edges`` of ``get_entity``. ``hop`` is 0 from
+#: ``list_edges`` (no seed) and 1-indexed from ``traverse``. The raw row shape
+#: (``subjectId`` / ``objectId``) is not exposed by any read route.
+GraphTraversalEdge = Dict[str, Any]
 
 
 class GraphStats(TypedDict, total=False):
@@ -170,7 +175,7 @@ class EntityWithEdges(TypedDict):
     """An entity plus its 1-hop neighbourhood, from ``memory.graph.get_entity()``."""
 
     entity: Optional[MemoryEntity]
-    edges: List[MemoryEdge]
+    edges: List[GraphTraversalEdge]
 
 
 def enum_value(x: Any) -> Any:

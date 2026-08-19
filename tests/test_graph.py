@@ -86,13 +86,31 @@ def test_get_entity_returns_entity_with_edges():
 
 
 @respx.mock
-def test_list_edges_hits_graph_edges():
+def test_list_edges_returns_hydrated_traversal_shape():
+    """The read routes hydrate both ends — `subject`/`object` are entity dicts,
+    not ids, and there is no `subjectId` on the wire at all."""
     route = respx.get(f"{PREFIX}/admin/memory/graph/edges").mock(
-        return_value=httpx.Response(200, json=[{"id": "g1", "predicate": "works_at"}])
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "g1",
+                    "subject": {"id": "e1", "canonicalName": "NVIDIA CORP"},
+                    "predicate": "reported_metric",
+                    "object": {"id": "e2", "canonicalName": "Cost of Revenue"},
+                    "objectLiteral": None,
+                    "weight": 0.85,
+                    "hop": 0,
+                }
+            ],
+        )
     )
     with client() as mm:
         out = mm.memory.graph.list_edges(limit=100)
-    assert out[0]["predicate"] == "works_at"
+    assert out[0]["subject"]["canonicalName"] == "NVIDIA CORP"
+    assert out[0]["object"]["canonicalName"] == "Cost of Revenue"
+    assert out[0]["hop"] == 0
+    assert "subjectId" not in out[0]
     assert route.calls.last.request.url.params["limit"] == "100"
 
 

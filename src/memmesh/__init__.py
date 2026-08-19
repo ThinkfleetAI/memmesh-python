@@ -39,7 +39,7 @@ from .errors import (
 from .types import (
     EntityWithEdges,
     GraphStats,
-    MemoryEdge,
+    GraphTraversalEdge,
     MemoryEntity,
     Accumulator,
     ActivityLevel,
@@ -172,7 +172,7 @@ from .types import (
 __all__ = [
     "GraphStats",
     "MemoryEntity",
-    "MemoryEdge",
+    "GraphTraversalEdge",
     "EntityWithEdges",
     "__version__",
     "MemMesh",

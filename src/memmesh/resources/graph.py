@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from ..types import EntityWithEdges, GraphStats, MemoryEdge, MemoryEntity
+from ..types import EntityWithEdges, GraphStats, GraphTraversalEdge, MemoryEntity
 
 
 def _entity_params(
@@ -115,7 +115,7 @@ class GraphResource:
         as_of: Optional[str] = None,
         limit: Optional[int] = None,
         project_id: Optional[str] = None,
-    ) -> List[MemoryEdge]:
+    ) -> List[GraphTraversalEdge]:
         """Every currently-valid edge.
 
         Use for rendering a whole small graph; for a large one, seed from an
@@ -136,7 +136,7 @@ class GraphResource:
         predicates: Optional[List[str]] = None,
         as_of: Optional[str] = None,
         project_id: Optional[str] = None,
-    ) -> List[MemoryEdge]:
+    ) -> List[GraphTraversalEdge]:
         """Walk out from a seed entity (1-3 hops).
 
         This is the multi-hop path: the edges returned here connect facts no
@@ -194,7 +194,7 @@ class AsyncGraphResource:
         as_of: Optional[str] = None,
         limit: Optional[int] = None,
         project_id: Optional[str] = None,
-    ) -> List[MemoryEdge]:
+    ) -> List[GraphTraversalEdge]:
         """Async mirror of :meth:`GraphResource.list_edges`."""
         params: dict = {}
         if as_of is not None:
@@ -211,7 +211,7 @@ class AsyncGraphResource:
         predicates: Optional[List[str]] = None,
         as_of: Optional[str] = None,
         project_id: Optional[str] = None,
-    ) -> List[MemoryEdge]:
+    ) -> List[GraphTraversalEdge]:
         """Async mirror of :meth:`GraphResource.traverse`."""
         return await self._t.post(
             "/admin/memory/graph/traverse",
