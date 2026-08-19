@@ -6,6 +6,7 @@ from .consent import AsyncConsentResource, ConsentResource
 from .context import AsyncContextResource, ContextResource
 from .events import AsyncEventsResource, EventsResource
 from .financial import AsyncFinancialResource, FinancialResource
+from .graph import AsyncGraphResource, GraphResource
 from .health import AsyncHealthResource, HealthResource
 from .lattice import AsyncLatticeResource, LatticeResource
 from .learning import AsyncLearningResource, LearningResource
@@ -14,6 +15,8 @@ from .typed import AsyncTypedAttributesResource, TypedAttributesResource
 
 __all__ = [
     "MemoryResource",
+    "GraphResource",
+    "AsyncGraphResource",
     "AsyncMemoryResource",
     "LatticeResource",
     "AsyncLatticeResource",

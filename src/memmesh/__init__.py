@@ -37,6 +37,10 @@ from .errors import (
     ValidationError,
 )
 from .types import (
+    EntityWithEdges,
+    GraphStats,
+    GraphTraversalEdge,
+    MemoryEntity,
     Accumulator,
     ActivityLevel,
     AlertDeliveryResult,
@@ -166,6 +170,10 @@ from .types import (
 )
 
 __all__ = [
+    "GraphStats",
+    "MemoryEntity",
+    "GraphTraversalEdge",
+    "EntityWithEdges",
     "__version__",
     "MemMesh",
     "AsyncMemMesh",

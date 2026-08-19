@@ -13,6 +13,7 @@ from .._pagination import (
     apaginate,
     paginate,
 )
+from .graph import AsyncGraphResource, GraphResource
 from ..types import (
     ExplainResult,
     FeedbackRating,
@@ -128,12 +129,30 @@ def _observe_body(
     return body
 
 
-def _observe_text_body(text: str, role: str, occurred_at: Optional[str]) -> dict:
+def _observe_text_body(
+    text: str,
+    role: str,
+    occurred_at: Optional[str],
+    user_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> dict:
     """Body for the raw-text observe path — the engine's noise filter runs over
-    ``text`` and decides what (if anything) to keep."""
+    ``text`` and decides what (if anything) to keep.
+
+    The identity fields are provenance, recorded on whatever the engine keeps.
+    They are omitted rather than sent as null so a turn without them is
+    indistinguishable from one made by an older client.
+    """
     body: dict = {"text": text, "role": role}
     if occurred_at:
         body["occurredAt"] = occurred_at
+    if user_id:
+        body["userId"] = user_id
+    if agent_id:
+        body["agentId"] = agent_id
+    if session_id:
+        body["sessionId"] = session_id
     return body
 
 
@@ -162,6 +181,8 @@ class MemoryResource:
 
     def __init__(self, transport: Any) -> None:
         self._t = transport
+        #: Knowledge-graph reads — entities, edges, traversal, counts.
+        self.graph = GraphResource(transport)
 
     def observe(
         self,
@@ -176,6 +197,9 @@ class MemoryResource:
         category: Optional[str] = None,
         activity_type: Optional[str] = None,
         occurred_at: Optional[str] = None,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        session_id: Optional[str] = None,
         metadata: Optional[dict] = None,
         project_id: Optional[str] = None,
     ) -> ObserveResponse:
@@ -205,7 +229,7 @@ class MemoryResource:
         Either ``text`` (preferred) or ``content`` is required.
         """
         if text is not None and text.strip():
-            body = _observe_text_body(text, role, occurred_at)
+            body = _observe_text_body(text, role, occurred_at, user_id, agent_id, session_id)
             return _observe_response(self._t.post("/memory/observe", body, project_id))
         if content is not None and content.strip():
             body = _observe_body(content, subject, type, scope, importance, category, activity_type, occurred_at, metadata)
@@ -587,6 +611,8 @@ class AsyncMemoryResource:
 
     def __init__(self, transport: Any) -> None:
         self._t = transport
+        #: Knowledge-graph reads — entities, edges, traversal, counts.
+        self.graph = AsyncGraphResource(transport)
 
     async def observe(
         self,
@@ -601,6 +627,9 @@ class AsyncMemoryResource:
         category: Optional[str] = None,
         activity_type: Optional[str] = None,
         occurred_at: Optional[str] = None,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        session_id: Optional[str] = None,
         metadata: Optional[dict] = None,
         project_id: Optional[str] = None,
     ) -> ObserveResponse:
@@ -608,7 +637,7 @@ class AsyncMemoryResource:
         turn through the engine's noise filter); ``content`` stays for legacy
         verbatim stores. Either ``text`` or ``content`` is required."""
         if text is not None and text.strip():
-            body = _observe_text_body(text, role, occurred_at)
+            body = _observe_text_body(text, role, occurred_at, user_id, agent_id, session_id)
             return _observe_response(await self._t.post("/memory/observe", body, project_id))
         if content is not None and content.strip():
             body = _observe_body(content, subject, type, scope, importance, category, activity_type, occurred_at, metadata)
